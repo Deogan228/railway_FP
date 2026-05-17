@@ -4,43 +4,69 @@ import monads.{*, given}
 
 object FuncState:
 
+  // ---------- вспомогательные функции ----------
+
+  // поиск поезда, либо ошибка
+  private def findTrain(s: OfficeState, name: String): Either[String, Train] =
+    s.trains.find(_.name == name)
+      .toRight(s"Ошибка: поезд $name не найден")
+
+  // проверка свободности места
+  private def checkSeat(train: Train, seat: String, cfg: TicketConfig): Either[String, Unit] =
+    if FuncReader.seatAvailable(train, seat).run(cfg) then Right(())
+    else Left(s"Ошибка: место $seat занято или не существует")
+
+  // получение цены по тарифу
+  private def getPrice(route: String, cls: ClassType, cfg: TicketConfig): Either[String, Double] =
+    FuncReader.ticketPrice(route, cls).run(cfg)
+      .toRight(s"Ошибка: нет тарифа для $route")
+
+  // применение успешной брони к состоянию
+  private def applyBooking(s: OfficeState, train: Train, seat: String,
+                            cls: ClassType, price: Double, bag: Double,
+                            cfg: TicketConfig): (OfficeState, Ticket) =
+    val bagCost = FuncReader.baggageCost(bag).run(cfg)
+    val ticket = Ticket(
+      id            = s.nextTicketId,
+      route         = train.route,
+      classType     = cls,
+      seat          = seat,
+      price         = price,
+      baggageWeight = bag,
+      baggageCost   = bagCost
+    )
+    val updatedTrain  = train.copy(seats = train.seats.updated(seat, true))
+    val updatedTrains = s.trains.map(t => if t.name == train.name then updatedTrain else t)
+    val ns = s.copy(
+      trains       = updatedTrains,
+      soldTickets  = s.soldTickets :+ ticket,
+      revenue      = s.revenue + price + bagCost,
+      nextTicketId = s.nextTicketId + 1
+    )
+    (ns, ticket)
+
+  // ---------- основная функция: линейный for ----------
+
   def bookTicket(trainName: String, seat: String, classType: ClassType,
                  baggageWeight: Double)(cfg: TicketConfig): State[OfficeState, Vector[String]] =
     State { s =>
-      s.trains.find(_.name == trainName) match
-        case None =>
-          (s, Writer.tell(s"Ошибка: поезд $trainName не найден").log)
+      val result =
+        for
+          train <- findTrain(s, trainName)
+          _     <- checkSeat(train, seat, cfg)
+          price <- getPrice(train.route, classType, cfg)
+        yield (train, price)
 
-        case Some(train) =>
-          if !FuncReader.seatAvailable(train, seat).run(cfg) then
-            (s, Writer.tell(s"Ошибка: место $seat занято или не существует").log)
-          else
-            FuncReader.ticketPrice(train.route, classType).run(cfg) match
-              case None =>
-                (s, Writer.tell(s"Ошибка: нет тарифа для ${train.route}").log)
-              case Some(price) =>
-                val bagCost = FuncReader.baggageCost(baggageWeight).run(cfg)
-                val ticket = Ticket(
-                  id            = s.nextTicketId,
-                  route         = train.route,
-                  classType     = classType,
-                  seat          = seat,
-                  price         = price,
-                  baggageWeight = baggageWeight,
-                  baggageCost   = bagCost
-                )
-                val updatedTrain  = train.copy(seats = train.seats.updated(seat, true))
-                val updatedTrains = s.trains.map(t => if t.name == trainName then updatedTrain else t)
-                val ns = s.copy(
-                  trains       = updatedTrains,
-                  soldTickets  = s.soldTickets :+ ticket,
-                  revenue      = s.revenue + price + bagCost,
-                  nextTicketId = s.nextTicketId + 1
-                )
-                (ns, Vector(s"Билет #${ticket.id} оформлен: $trainName место=$seat класс=$classType цена=$price багаж=$bagCost"))
+      result match
+        case Left(err) =>
+          (s, Vector(err))
+        case Right((train, price)) =>
+          val (ns, ticket) = applyBooking(s, train, seat, classType, price, baggageWeight, cfg)
+          (ns, Vector(s"Билет #${ticket.id} оформлен: $trainName место=$seat класс=$classType цена=$price багаж=${ticket.baggageCost}"))
     }
 
-  // отмена по id, возвращает деньги за вычетом штрафа
+  // ---------- остальные функции без изменений ----------
+
   def cancelTicket(ticketId: Int)(cfg: TicketConfig): State[OfficeState, Vector[String]] =
     State { s =>
       s.soldTickets.find(_.id == ticketId) match
