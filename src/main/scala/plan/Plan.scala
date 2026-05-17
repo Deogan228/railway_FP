@@ -1,7 +1,7 @@
 package plan
 
 import monads.{*, given}
-import domain.{OfficeState, TicketConfig, ClassType, Train, FuncState, FuncWriter}
+import domain.{OfficeState, TicketConfig, ClassType, Train, FuncState}
 
 // запустить State-действие внутри IO
 def runState[A](s: OfficeState, action: State[OfficeState, A]): IO[(OfficeState, A)] =
@@ -52,7 +52,6 @@ def bookTicketAction(s: OfficeState, cfg: TicketConfig): IO[OfficeState] =
     trainName  = if trainNum >= 1 && trainNum <= s.trains.size
                  then s.trains(trainNum - 1).name
                  else ""
-    // показать свободные места выбранного поезда
     _         <- s.trains.find(_.name == trainName) match
                    case Some(t) =>
                      val freeSeats = t.seats.filter { case (_, occupied) => !occupied }.keys.toList.sorted
@@ -103,14 +102,3 @@ def nextDayAction(s: OfficeState, cfg: TicketConfig): IO[OfficeState] =
     (ns, log) = res
     _        <- printLog(log)
   yield ns
-
-def writerDemoAction(s: OfficeState, cfg: TicketConfig): IO[OfficeState] =
-  val w1 = FuncWriter.logRouteChoice("Moscow-SPb")
-  val w2 = FuncWriter.logPriceCalc("Moscow-SPb", 3500, 200)
-  val w3 = FuncWriter.logSeatAssigned("2A", "Express-1")
-  val w4 = FuncWriter.logRefund(1, 3150)
-  val logs = w1.log ++ w2.log ++ w3.log ++ w4.log
-  for
-    _ <- IO.writeLine("--- Writer demo ---")
-    _ <- printLog(logs)
-  yield s

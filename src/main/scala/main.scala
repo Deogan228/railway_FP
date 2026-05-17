@@ -33,8 +33,7 @@ import ui.{MenuLeaf, MenuTreeNode}
       MenuLeaf("Купить билет",        bookTicketAction),
       MenuLeaf("Вернуть билет",       cancelTicketAction),
       MenuLeaf("Добавить поезд",      addTrainAction),
-      MenuLeaf("Следующий день",      nextDayAction),
-      MenuLeaf("Writer demo",         writerDemoAction)
+      MenuLeaf("Следующий день",      nextDayAction)
     )
   )
 
